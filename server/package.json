@@ -1,0 +1,25 @@
+{
+  "name": "ldapjs-mongodb",
+  "version": "0.0.1",
+  "description": "mongodb backed ldapjs server package",
+  "main": "server.js",
+  "keywords": [
+    "ldap",
+    "mongodb",
+    "auth"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "John Fanjoy",
+  "license": "WTFPL",
+  "dependencies": {
+    "generate-key": "0.0.6",
+    "ldapjs": "^0.7.1",
+    "mongoose": "^3.8.14",
+    "mongoose-acl": "^0.2.1",
+    "sprintf": "^0.1.3",
+    "ssha": "^1.0.1",
+    "bunyan": "~1.0.0"
+  }
+}

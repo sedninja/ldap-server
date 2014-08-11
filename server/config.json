@@ -1,0 +1,5 @@
+{
+  "organization" : "/SedNinja\\.com/ip",
+  "basedn" : "dc=sedninja,dc=com",
+  "listen" : 389
+}
