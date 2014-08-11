@@ -12,7 +12,7 @@ RUN \
   install -dT -m2755 /tmp/build && \
   install -dT -m2755 /opt/ldapserver && \
   echo "All done with the nonsense... on to installing the actual server"
-COPY package.json /tmp/build/
+COPY server/package.json /tmp/build/
 WORKDIR /tmp/build
 RUN npm install && \
     cp -a node_modules /opt/ldapserver
