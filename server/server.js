@@ -70,7 +70,6 @@ function authorize( req, res, next ) {
 
 // this is in the nature of the old rootdn rootpw combo
 function __admin_bind( req, res, next ) {
-
   var binddn = req.dn.toString();
   var bindable = new RegExp("(?=())");
 }
@@ -155,7 +154,10 @@ server.listen(port,function() {
         } else {
           log.warn("root bindPW is set to \"" + randompass + "\"");
         }
-        admin.setAccess();
+        log.info("you can add more users with the openldap/ldapadd utility");
+        log.info("i.e. ldapadd -H \"ldap://%s:%s\" -WD \"uid=admin,ou=users,%s\" -f newusers.ldif",dbhost,dbport,config.basedn);
+        // User.setAccess(admin,["add","delete","view","edit"]);
+        // Group.setAccess(admin,["add","delete","view","edit"]);
       });
     } else {
       log.info("admin account name: " + res[0].login);
