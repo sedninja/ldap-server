@@ -7,9 +7,7 @@ var Group = require('./models/group.js');
 
 var bunyan = require('bunyan');
 
-var sprintf = require('sprintf');
-var ssha = require('ssha');
-var rand = require('generate-key');
+var util = require('util');
 var config = require('./config.json');
 
 var log = bunyan.createLogger({
@@ -24,7 +22,7 @@ var log = bunyan.createLogger({
 var dbhost = process.env.DB_PORT_27017_TCP_ADDR || "127.0.0.1",
     dbport = process.env.DB_PORT_27017_TCP_PORT || 27017,
     dbname = new String(process.env.DB_NAME || "/feta/db").replace(/\//g,"");
-var dsn = sprintf("mongodb://%s:%s/%s",dbhost,dbport,dbname);
+var dsn = util.format("mongodb://%s:%s/%s",dbhost,dbport,dbname);
 mongoose.connect(dsn);
 
 // create the ldap server
@@ -43,31 +41,28 @@ function authorize( req, res, next ) {
   return next();
 }
 
-// this is in the nature of the old rootdn rootpw combo
-function __admin_bind( req, res, next ) {
+server.bind('ou=users,' + config.basedn, function( req, res, next) {
   var binddn = req.dn.toString();
-  var bindable = new RegExp("(?=())");
-}
-
-server.bind(config.basedn, function( req, res, next) {
-  var binddn = req.dn.toString();
-  // test to make sure the request comes from a bindable object
-  var bindable = new RegExp("(?=(ou=(users|services)," + config.basedn + "$))");
-  if ( !bindable.test(binddn) ) {
+  if ( !req.credentials ) {
     err = new ldap.InvalidCredentialsError();
     log.info(err);
     return next(err);
   }
-  var requser = req.dn.rdns[0];
-  var reqcred = req.credentials;
-  // now accepting cn and uid logins (to accomodate services)
-  var uid = requser.uid || requser.cn;
+  var login = req.dn.rdns[0];
   log.info("binding as: " + binddn);
-  User.find( { uid: uid } , function(err,users) {
-    if ( err ) { log.alert(err); return next(err); }
+  // accepting logins using uid or cn for now
+  User.find( { uid: login.uid || login.cn } , function(err,users) {
+    if ( err ) { 
+      log.info(err);
+      return next(err);
+    }
+    else if ( !users.length ) {err = new ldap.InvalidCredentialsError(); log.info(err); return next(err);}
     else {
+      // investigate further if this ever becomes an issue
+      var result = users[0];
       log.info("Checking credentials now");
-      if ( ssha.verify(reqcred, users[0].password) ) {
+      if ( result.verifypw(req.credentials) && result.enabled ) {
+        log.trace(result.objectClass('posixaccount'));
         log.info("bind successful.. processing next part of request");
         res.end();
         return next();
@@ -91,50 +86,103 @@ server.add('ou=users,' + config.basedn, pre, function( req, res, next ) {
     var uid = req.attributes.uid || entry.rdns[0].uid;
     if ( uid === entry.rdns[0].uid ) {
       log.info("adding new account for \"%s\" now",uid);
-      var userspec = {};
-      for ( k in u ) {
-        userspec[k] = u[k][0];
-      }
+      var userspec = {}; for ( k in u ) { userspec[k] = u[k][0]; }
       log.debug(userspec);
-      var user = User.create(userspec, function(err, nuser) {
-        log.trace(nuser);
+      User.create(userspec, function(err, user) {
         if ( err ) {
           var death = new ldap.UnwillingToPerformError(err);
           log.fatal(death);
           return next(death);
         }  
         log.info("user account created for \"%s\" sucessfully",user.uid);
+
         res.end();
         return next();
       });
-    } else {
-      err = new ldap.ConstraintViolationError();
-      log.crit(err);
-      return next(err);
     }
+  } else {
+    // more error checking later, for now... ambiguous "constraint violation"
+    // will have to do
+    err = new ldap.ConstraintViolationError();
+    log.info(err);
+    return next(err);
   }
 });
+
+server.add('ou=groups,' + config.basedn, pre, function( req, res, next ) {
+  var entry = req.entry;
+  var g = req.toObject().attributes;
+  if ( entry.rdns[0].cn ) {
+  
+  }
+});
+
+// support for adding ous or other base objects to the directory
+server.add(config.basedn, pre, function( req, res, next ) {
+  return next();
+});
+
+server.modify( 'ou=users,' + config.basedn, pre, function( req, res, next ) {
+  var dn = req.dn.rdns[0],
+      uid = dn.uid;
+  if ( uid && req.changes.length ) {
+    User.find({ uid: dn.uid }, function(err, user) {
+      if ( err ) {
+        log.error(err);
+        return next(err);
+      }
+      user = user[0];
+      var mod, op, field, curop;
+      // updating modified will be moved into the pre validate logic soon
+      // enough
+      var update = {};
+      log.trace(req.changes);
+      for ( c in req.changes ) {
+        mod = req.changes[c].modification, 
+              op = req.changes[c].operation,
+              field = user[mod.type];
+        
+        switch(op) {
+          case 'add':
+          case 'replace':
+            if ( mod.type === 'uid' || !mod.vals || !mod.vals.length || !field ) {
+              return next(new ldap.UnwillingToPerformError('unable to change uid without "modifydn operation"'));
+            }
+            if ( util.isArray(field) ) user[mod.type] = mod.vals;
+            else user[mod.type] = mod.vals[0];
+            break;
+        }
+      }
+      log.debug("modifying attributes for \"%s\" now",dn.toString());
+      user.save();
+    });
+  } else if ( ! req.changes.length ) return next(new ldap.ProtocolError("changes required"));
+  else return next(new ldap.NoSuchObjectError(req.dn.toString()));
+});
 server.search(config.basedn, pre, function(req, res, next) {
-  log.debug("performing `ldapsearch` for dn: " + this.bindDN)
-  log.info(req.filter);
+  log.info("performing `ldapsearch` on behalf of dn: " + req.connection.ldap.bindDN);
   
   // very incomplete right now. Only supports the EqualityMatch filter type
   // and completely ignores the field list that may have been supplied by
   // the client
   var filter = req.filter.json,
       attr = filter.attribute,
-      val = filter.value;
+      val = filter.value,
+      attributes = req.json.attributes;
 
   var search = {};
   search[attr] = val;
+  log.trace(search);
 
   User.find(search,function(err,users) {
     if ( err ) { log.fatal(err) ; return next(err); }
     users.forEach(function(user){
       var ldapUser = user.getLdapEntry();
+      var retuser = ldapUser[0];
+      attributes.map(function(v,k) {if ( ! /^\+$/.test(v) ) {retuser[v] = user.get(v);}});
       res.send({
-        dn: sprintf("uid=%s,ou=users,%s",user.uid, config.basedn),
-        attributes: ldapUser[0]
+        dn: user.DN(config.basedn),
+        attributes: retuser
       });
     });
     res.end();
@@ -143,7 +191,7 @@ server.search(config.basedn, pre, function(req, res, next) {
 });
 
 server.exop("1.3.6.1.4.1.4203.1.11.3", function( req, res, next ) {
-  log.debug("who be dat! ... performing exop `ldapwhoami`");
+  log.debug("who be dat?! ... performing `ldapwhoami`");
   var binddn = req.connection.ldap.bindDN.rdns.toString();
   res.value = "dn: " + binddn;
   log.trace(res.value);
@@ -160,41 +208,37 @@ server.listen(port,function() {
    * and make sure the account is part of the admin group unless account
    * enabled === false
    **/
-  Group.find( { cn: "everyone" } , function( err, res ) {
-    User.find({ uid: "admin" }, function( err, res) {
-      if ( err ) { log.fatal(err); exit(2); }
-      if ( res.length < 1 ) {
-        log.info("Setting up backend \"admin\" account for the first time");
-        var randompass = rand.generateKey(14);
-        var sshapass = ssha.create(randompass);
-        // not a posix account. Eventually I plan to completely remove this user
-        // from ou=users to keep the userlist from displaying it
-        var admin = new User({
-          uid: "admin",
-          password: sshapass,
-          name: { first: "Big" , last: "Pappa" },
-          roles: [ "admin" ],
-          groups: [ "everyone" ],
-          enabled: true,
-          description: "Automatically generated administrator account",
-          company: org
-        });
-        admin.save(function(err) {
-          if ( err ) {
-            var death = new ldap.UnwillingToPerformError(err);
-            log.fatal(death);
-            return death;
-          } else {
-            log.warn("root bindPW is set to \"" + randompass + "\"");
-          }
-          log.info("you can add more users with the openldap/ldapadd utility");
-          log.info("i.e. ldapadd -H \"ldap://%s:%s\" -WD \"uid=admin,ou=users,%s\" -f newusers.ldif",dbhost,port,config.basedn);
-          // User.setAccess(admin,["add","delete","view","edit"]);
-          // Group.setAccess(admin,["add","delete","view","edit"]);
-        });
-      } else {
-        log.debug("admin account name: " + res[0].uid);
-      }
-    });
+  User.find({ uid: "admin" }, function( err, res) {
+    if ( err ) { log.fatal(err); exit(2); }
+    if ( res.length < 1 ) {
+      log.info("Setting up backend \"admin\" account for the first time");
+      var adminpass = User.genpass(14);
+      var admin = new User({
+        uid: "admin",
+        password: adminpass.ssha,
+        name: { first: "Big" , last: "Pappa" },
+        roles: [ "admin" ],
+        groups: [ "everyone" ],
+        enabled: true,
+        description: "Automatically generated administrator account",
+        company: org
+      });
+      admin.save(function(err) {
+        if ( err ) {
+          var death = new ldap.UnwillingToPerformError(err);
+          log.fatal(death);
+          return death;
+        } else {
+          log.warn("root bindPW is set to \"" + adminpass.plain + "\"");
+        }
+        log.info("you can add more users with the openldap/ldapadd utility");
+        log.info("i.e. ldapadd -H \"ldap://%s:%s\" -WD \"uid=admin,ou=users,%s\" -f newusers.ldif",dbhost,port,config.basedn);
+        // User.setAccess(admin,["add","delete","view","edit"]);
+        // Group.setAccess(admin,["add","delete","view","edit"]);
+      });
+    } else {
+      log.debug("admin account name: " + res[0].uid);
+      log.trace(res[0].objectClass('posixAccount'));
+    }
   });
 });

@@ -14,12 +14,13 @@
   "author": "John Fanjoy",
   "license": "WTFPL",
   "dependencies": {
+    "bunyan": "~1.0.0",
     "generate-key": "0.0.6",
     "ldapjs": "^0.7.1",
     "mongoose": "^3.8.14",
     "mongoose-acl": "^0.2.1",
     "sprintf": "^0.1.3",
     "ssha": "^1.0.1",
-    "bunyan": "~1.0.0"
+    "util": "^0.10.3"
   }
 }
