@@ -60,7 +60,7 @@ server.bind('ou=users,' + config.basedn, function( req, res, next) {
     else {
       // investigate further if this ever becomes an issue
       var result = users[0];
-      log.info("Checking credentials now");
+      log.debug("Checking credentials now");
       if ( result.verifypw(req.credentials) && result.enabled ) {
         log.trace(result.objectClass('posixaccount'));
         log.info("bind successful.. processing next part of request");
@@ -144,17 +144,24 @@ server.modify( 'ou=users,' + config.basedn, pre, function( req, res, next ) {
         
         switch(op) {
           case 'add':
+            if ( util.isArray(field) ) user.set(mod.type, mod.vals);
+            else user.set(mod.type,mod.vals[0]);
+            break;
           case 'replace':
             if ( mod.type === 'uid' || !mod.vals || !mod.vals.length || !field ) {
               return next(new ldap.UnwillingToPerformError('unable to change uid without "modifydn operation"'));
             }
-            if ( util.isArray(field) ) user[mod.type] = mod.vals;
-            else user[mod.type] = mod.vals[0];
+            if ( util.isArray(field) ) user.set(mod.type, mod.vals);
+            else user.set(mod.type,mod.vals[0]);
             break;
         }
       }
       log.debug("modifying attributes for \"%s\" now",dn.toString());
-      user.save();
+      user.save(function(err) {
+        if ( err ) return next(new ldap.UnwillingToPerformError(err));
+        res.end();
+        return next();
+      });
     });
   } else if ( ! req.changes.length ) return next(new ldap.ProtocolError("changes required"));
   else return next(new ldap.NoSuchObjectError(req.dn.toString()));

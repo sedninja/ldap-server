@@ -19,6 +19,7 @@ RUN npm install && \
 COPY server/server.js /opt/ldapserver/
 COPY server/package.json /opt/ldapserver/
 COPY server/config.json /opt/ldapserver/
+COPY server/models /opt/ldapserver/models
 WORKDIR /opt/ldapserver
 CMD ["npm","start"]
 # it's ldap bitches

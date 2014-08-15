@@ -19,6 +19,7 @@
     "ldapjs": "^0.7.1",
     "mongoose": "^3.8.14",
     "mongoose-acl": "^0.2.1",
+    "object-merge": "^2.5.1",
     "sprintf": "^0.1.3",
     "ssha": "^1.0.1",
     "util": "^0.10.3"
